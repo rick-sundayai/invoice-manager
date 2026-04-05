@@ -19,8 +19,9 @@ A personal invoice management tool that automates extraction of financial data f
 | AI — Embeddings | Gemini `text-embedding-004` (768 dimensions) |
 | AI — Chat | Gemini `gemini-2.0-flash` |
 | Automation | n8n (external, not built here) |
+| n8n → Supabase | Supabase DB node (insert invoices) + Supabase Vector Store node (generate + store embeddings) |
 
-No auth for MVP. No Supabase Edge Functions — embedding generation happens in the Next.js approval route handler.
+No auth for MVP. No Supabase Edge Functions. n8n writes directly to Supabase — no Next.js webhook needed.
 
 ---
 
@@ -37,13 +38,11 @@ app/
   chat/
     page.tsx                  # Chat UI (conversation + data panel)
   api/
-    invoices/
-      route.ts                # POST — n8n webhook, inserts pending invoice
     chat/
       route.ts                # POST — Gemini hybrid search + response
     approve/
       [id]/
-        route.ts              # PATCH — approve invoice, generate embedding
+        route.ts              # PATCH — flip status to 'approved' only
 
 lib/
   supabase.ts                 # Supabase client (server + browser)
@@ -94,25 +93,24 @@ create index on invoices using hnsw (embedding vector_cosine_ops)
 ## 5. Data Flow
 
 ```
-n8n (external)
-  → POST /api/invoices
-      Validates Bearer token (N8N_WEBHOOK_SECRET)
-      Inserts row: status='pending', embedding=null
-      Returns 201 + { id }
+n8n (external, no Next.js webhook)
+  Gmail trigger
+  → LLM extraction (vendor, date, invoice #, amount, tax, currency, raw_text)
+  → Supabase DB node: INSERT into invoices (status='pending')
+  → Supabase Vector Store node: generate embedding from raw_text, write to invoices.embedding
+  Row is ready for review with embedding already populated.
 
 User (Review UI)
   → GET /review
       Fetches all status='pending' rows from Supabase
   → PATCH /api/approve/[id]
-      1. Updates status → 'approved'
-      2. Generates embedding via Gemini text-embedding-004 on raw_text
-      3. Writes embedding back to row
+      Updates status → 'approved' only (embedding already exists)
       Returns 200
 
 User (Chat UI)
   → POST /api/chat
       1. Embeds question via Gemini text-embedding-004
-      2. Vector similarity search (approved rows only, HNSW)
+      2. Vector similarity search (approved rows only, HNSW index)
       3. If aggregative question: also runs SQL aggregate (SUM/COUNT)
       4. Passes context + question to gemini-2.0-flash
       5. Streams text response; returns structured data separately
@@ -129,7 +127,7 @@ User (Chat UI)
 - Shadcn `Table` on a white card, light slate header row
 - Columns: Vendor (bold) / Invoice # (muted, links to `/review/[id]`) · Date · Amount + Currency (stacked) · Tax · ✓ approve button
 - Route param for `/review/[id]` uses the row UUID; link text displays the invoice number
-- Clicking ✓ calls `PATCH /api/approve/[id]`, optimistically removes the row
+- Clicking ✓ calls `PATCH /api/approve/[id]` (status update only), optimistically removes the row
 - "Approve All" calls `PATCH /api/approve/[id]` for every pending row in sequence, clearing the table on completion
 - Edit page (`/review/[id]`): Shadcn form to correct any field; submit approves and redirects to `/review`
 - Empty state: "All caught up" message
@@ -158,14 +156,17 @@ User (Chat UI)
 
 ---
 
-## 8. n8n Webhook
+## 8. n8n Integration Notes
 
-**`POST /api/invoices`**
+n8n writes directly to Supabase — no Next.js API route is involved in the ingestion pipeline.
 
-- Auth: `Authorization: Bearer <secret>` validated against `N8N_WEBHOOK_SECRET` env var. Returns `401` on mismatch.
-- Payload: `{ vendor_name, invoice_date, invoice_number, amount, tax, currency, raw_text }`
-- All fields optional at insert (n8n extraction may be partial) — user corrects in Review UI before approving
-- Returns `201 { id }` on success
+**n8n workflow:**
+1. Gmail trigger — polls for unread emails with PDF attachments
+2. LLM extraction — sends PDF to model, extracts structured fields
+3. Supabase DB node — `INSERT` into `invoices` with `status='pending'`
+4. Supabase Vector Store node — generates embedding from `raw_text`, writes to `invoices.embedding`
+
+All fields are optional at insert — the user corrects any extraction errors in the Review UI before approving.
 
 ---
 
@@ -176,7 +177,6 @@ NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY
 GEMINI_API_KEY
-N8N_WEBHOOK_SECRET
 ```
 
 ---
