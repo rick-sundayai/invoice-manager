@@ -38,7 +38,7 @@ export default async function EditInvoicePage({
         invoice_date: formData.get('invoice_date') as string || null,
         amount: parseFloat(formData.get('amount') as string) || null,
         tax: parseFloat(formData.get('tax') as string) || null,
-        currency: (formData.get('currency') as string).toUpperCase() || null,
+        currency: (formData.get('currency') as string | null)?.toUpperCase() || null,
         status: 'approved',
       })
       .eq('id', id)
