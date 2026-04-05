@@ -1,5 +1,6 @@
 // app/review/[id]/page.tsx
 import { redirect, notFound } from 'next/navigation'
+import Link from 'next/link'
 import { createServerClient } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -49,7 +50,7 @@ export default async function EditInvoicePage({
   return (
     <div className="p-8 max-w-lg">
       <div className="mb-6">
-        <a href="/review" className="text-sm text-blue-600 hover:underline">← Back to inbox</a>
+        <Link href="/review" className="text-sm text-blue-600 hover:underline">← Back to inbox</Link>
         <h1 className="text-2xl font-bold text-slate-900 mt-2">Edit Invoice</h1>
         <p className="text-sm text-slate-500 mt-1">Correct any fields then approve.</p>
       </div>
