@@ -28,16 +28,27 @@ type CurrencyAggregate = {
 }
 
 export async function POST(request: Request) {
-  const { message } = await request.json() as { message: string }
+  let message: string
+  try {
+    const body = await request.json() as { message?: string }
+    message = body.message ?? ''
+  } catch {
+    return Response.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
 
-  if (!message?.trim()) {
+  if (!message.trim()) {
     return Response.json({ error: 'Message is required' }, { status: 400 })
   }
 
   const supabase = createServerClient()
 
   // 1. Embed the question
-  const embedding = await embedText(message)
+  let embedding: number[]
+  try {
+    embedding = await embedText(message)
+  } catch {
+    return Response.json({ error: 'Embedding failed' }, { status: 500 })
+  }
   const embeddingString = `[${embedding.join(',')}]`
 
   // 2. Vector similarity search against approved invoices
@@ -100,7 +111,12 @@ ${invoiceContext}${aggregateContext}
 User question: ${message}`
 
   // 5. Generate response
-  const rawResponse = await generateResponse(prompt)
+  let rawResponse: string
+  try {
+    rawResponse = await generateResponse(prompt)
+  } catch {
+    return Response.json({ error: 'Generation failed' }, { status: 500 })
+  }
   const data: DataBlock | null = parseDataBlock(rawResponse)
   const text = stripDataBlock(rawResponse)
 
