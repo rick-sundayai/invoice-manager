@@ -5,7 +5,7 @@ export type Invoice = {
   id: string
   status: InvoiceStatus
   vendor_name: string | null
-  invoice_date: string | null
+  invoice_date: string | null  // ISO-8601 date, e.g. "2024-03-15"
   invoice_number: string | null
   amount: number | null
   tax: number | null
