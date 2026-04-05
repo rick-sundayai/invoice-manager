@@ -1,5 +1,5 @@
 // lib/chat.test.ts
-import { isAggregativeQuery, parseDataBlock } from './chat'
+import { isAggregativeQuery, parseDataBlock, stripDataBlock } from './chat'
 
 describe('isAggregativeQuery', () => {
   it('returns true for "total" keyword', () => {
@@ -45,5 +45,15 @@ describe('parseDataBlock', () => {
   it('returns null when data block contains invalid JSON', () => {
     const text = 'Answer.\n<data>not json</data>'
     expect(parseDataBlock(text)).toBeNull()
+  })
+})
+
+describe('stripDataBlock', () => {
+  it('removes the data block from text', () => {
+    expect(stripDataBlock('Answer.\n<data>{"items":[]}</data>')).toBe('Answer.')
+  })
+
+  it('returns text unchanged when no data block present', () => {
+    expect(stripDataBlock('No block here.')).toBe('No block here.')
   })
 })
