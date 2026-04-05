@@ -6,7 +6,7 @@
 
 **Architecture:** Next.js 16 App Router with a dark left sidebar shell. n8n writes invoices directly to Supabase (no webhook). The Next.js app handles approval (status flip only) and chat (Gemini hybrid vector + SQL search). All AI uses Gemini — `text-embedding-004` for embeddings, `gemini-2.0-flash` for chat.
 
-**Tech Stack:** Next.js 16, Tailwind CSS v4, Shadcn/UI, @supabase/supabase-js, @google/generative-ai, Jest (unit tests for pure utilities only)
+**Tech Stack:** Next.js 16, Tailwind CSS v4, Shadcn/UI, @supabase/supabase-js, @google/generative-ai, Jest (unit tests for pure utilities only), n8n
 
 ---
 
