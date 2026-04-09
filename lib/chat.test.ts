@@ -123,4 +123,20 @@ describe('buildPrompt', () => {
     const result = buildPrompt(SYSTEM, 'q', [], '', [])
     expect(result).not.toContain('Conversation so far')
   })
+
+  it('uses fallback values for null invoice fields', () => {
+    const nullInvoice: InvoiceContext = {
+      vendor_name: null,
+      invoice_date: null,
+      invoice_number: null,
+      amount: null,
+      tax: null,
+      currency: null,
+      raw_text: null,
+      similarity: 0.8,
+    }
+    const result = buildPrompt(SYSTEM, 'q', [nullInvoice], '', [])
+    expect(result).not.toContain('null')
+    expect(result).toContain('Unknown')
+  })
 })

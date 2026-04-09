@@ -60,7 +60,7 @@ export function buildPrompt(
     parts.push('No matching invoices found.')
   } else {
     invoices.forEach(invoice => {
-      const line = `Vendor: ${invoice.vendor_name} | Date: ${invoice.invoice_date} | Invoice#: ${invoice.invoice_number} | Amount: ${invoice.amount} ${invoice.currency} | Tax: ${invoice.tax} | Similarity: ${invoice.similarity.toFixed(3)}`
+      const line = `Vendor: ${invoice.vendor_name ?? 'Unknown'} | Date: ${invoice.invoice_date ?? 'Unknown'} | Invoice#: ${invoice.invoice_number ?? 'N/A'} | Amount: ${invoice.amount ?? 0} ${invoice.currency ?? ''} | Tax: ${invoice.tax ?? 0} | Similarity: ${invoice.similarity.toFixed(3)}`
       parts.push(line)
     })
   }
