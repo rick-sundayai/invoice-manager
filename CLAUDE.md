@@ -11,6 +11,8 @@ npm run dev      # Start dev server (Turbopack by default)
 npm run build    # Production build (Turbopack by default)
 npm run start    # Start production server
 npm run lint     # Run ESLint (uses `eslint` CLI, not `next lint`)
+npm test         # Run Jest tests (node environment, ts-jest)
+npx jest lib/chat.test.ts  # Run a single test file
 ```
 
 ## Stack
@@ -68,7 +70,7 @@ Personal invoice management tool. n8n extracts financial data from Gmail PDFs an
 - **Hybrid search in chat:** embed query → pgvector cosine similarity on approved rows → optional SQL aggregate for counts/totals → Gemini `gemini-2.0-flash` for final response.
 - **Partial HNSW index** on `status = 'approved'` — pending rows are invisible to vector search at the DB level.
 
-### Planned Project Structure
+### Project Structure
 
 ```
 app/
@@ -100,15 +102,31 @@ components/
 
 ### AI
 
-- Embeddings: Gemini `text-embedding-004` — 768 dimensions
+- Embeddings: Gemini `gemini-embedding-001` — 768 dimensions
 - Chat: Gemini `gemini-2.0-flash`
 - Package: `@google/generative-ai`
+
+> **Note:** `lib/gemini.ts` currently calls `text-embedding-004` (line 16) — needs updating to `gemini-embedding-001`.
+
+### Chat API Contract
+
+`POST /api/chat` accepts `{ message: string }` and returns `{ text: string, data: DataBlock | null }`.
+
+Gemini is prompted to embed structured data inside `<data>...</data>` XML tags in its response. `lib/chat.ts` parses this out:
+- `parseDataBlock(text)` — extracts `DataBlock` from `<data>` tag
+- `stripDataBlock(text)` — removes the `<data>` tag, leaving clean prose
+- `isAggregativeQuery(query)` — detects spend/total questions to trigger SQL aggregate
+
+`DataBlock` shape: `{ items: [{vendor, amount, currency}], total?, currency? }`
 
 ### Database (Supabase + pgvector)
 
 - `invoices` table with `embedding vector(768)` column
 - `status` is a PostgreSQL enum: `'pending' | 'approved'`
-- `embedding` is nullable — n8n populates it via Supabase Vector Store node at insert time
+- `embedding` is nullable — n8n populates it via direct HTTP call to `gemini-embedding-001` at insert time (not using the Supabase Vector Store node)
+- `metadata` jsonb — stores full Gemini extraction JSON; `gmail_message_id`, `updated_at`, `last_updated_by` columns also present
+- `InvoiceRow = Omit<Invoice, 'embedding'>` — use this type for UI components that never need the vector
+- Tests only cover pure functions in `lib/` (no Next.js or Supabase mocking). `lib/chat.test.ts` is the only test file.
 - Use `SUPABASE_SERVICE_ROLE_KEY` server-side (never expose to client)
 
 ### Environment Variables

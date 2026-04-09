@@ -16,10 +16,10 @@ A personal invoice management tool that automates extraction of financial data f
 |---|---|
 | Frontend | Next.js 16 (App Router), Tailwind CSS v4, Shadcn/UI |
 | Backend | Supabase (PostgreSQL + pgvector) |
-| AI — Embeddings | Gemini `text-embedding-004` (768 dimensions) |
+| AI — Embeddings | Gemini `gemini-embedding-001` (768 dimensions) |
 | AI — Chat | Gemini `gemini-2.0-flash` |
 | Automation | n8n (external, not built here) |
-| n8n → Supabase | Supabase DB node (insert invoices) + Supabase Vector Store node (generate + store embeddings) |
+| n8n → Supabase | HTTP Request (Gemini embedding API) + Supabase node (insert with embedding) |
 
 No auth for MVP. No Supabase Edge Functions. n8n writes directly to Supabase — no Next.js webhook needed.
 
@@ -63,30 +63,40 @@ components/
 
 ```sql
 create extension if not exists vector;
-
 create type invoice_status as enum ('pending', 'approved');
 
 create table invoices (
-  id              uuid primary key default gen_random_uuid(),
-  status          invoice_status not null default 'pending',
-  vendor_name     text,
-  invoice_date    date,
-  invoice_number  text,
-  amount          numeric(12, 2),
-  tax             numeric(12, 2),
-  currency        char(3),
-  raw_text        text,
-  embedding       vector(768),
-  created_at      timestamptz not null default now()
+  id                  uuid primary key default gen_random_uuid(),
+  status              invoice_status not null default 'pending',
+  vendor_name         text,
+  invoice_date        date,
+  invoice_number      text,
+  amount              numeric(12, 2),
+  tax                 numeric(12, 2),
+  currency            char(3),
+  raw_text            text,
+  embedding           vector(768),    -- gemini-embedding-001, 768 dims
+  metadata            jsonb,          -- full Gemini extraction JSON
+  gmail_message_id    text unique,    -- Gmail message ID = PDF filename stem
+  source_vendor_email text,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz default now(),
+  last_updated_by     text default 'system_n8n'
 );
 
--- HNSW index on approved rows only — performs well at small dataset sizes
-create index on invoices using hnsw (embedding vector_cosine_ops)
+-- Deduplication
+create unique index invoices_unique_invoice on invoices (invoice_number, vendor_name);
+
+-- HNSW partial index — approved rows only
+create index invoices_embedding_idx on invoices
+  using hnsw (embedding vector_cosine_ops)
   where status = 'approved';
 ```
 
-- `embedding` is nullable — populated at approval time, not on insert
+- `embedding` is nullable — populated by n8n **at insert time** (not at approval time)
 - Partial index on `status = 'approved'` enforces human-in-the-loop at the database level — pending rows are invisible to vector search without any application filtering
+- `metadata` stores the full nested JSON from Gemini extraction (billing ID, line items, customer details, etc.)
+- Full schema with triggers and RPC functions: `docs/db/001-initial-schema.sql`
 
 ---
 
@@ -94,10 +104,17 @@ create index on invoices using hnsw (embedding vector_cosine_ops)
 
 ```
 n8n (external, no Next.js webhook)
-  Gmail trigger
-  → LLM extraction (vendor, date, invoice #, amount, tax, currency, raw_text)
-  → Supabase DB node: INSERT into invoices (status='pending')
-  → Supabase Vector Store node: generate embedding from raw_text, write to invoices.embedding
+  Gmail trigger (from:payments-noreply@google.com has:attachment)
+  → Supabase Storage Upload: PUT invoices/{gmail_message_id}.pdf
+  → [Supabase DB trigger on_invoice_upload fires automatically]
+  → n8n Webhook receives: { file_path, bucket_id }
+  → HTTP Request: fetch PDF binary from Supabase Storage
+  → Gemini 2.0 Flash (multimodal): extract structured JSON from PDF
+  → Code node: flatten JSON → DB columns, build raw_text for embedding
+  → Supabase: check (invoice_number, vendor_name) for duplicates
+  → IF new: HTTP Request → gemini-embedding-001 → 768-dim vector
+            Supabase INSERT: all fields + embedding (status='pending')
+  → IF duplicate: UPDATE updated_at only
   Row is ready for review with embedding already populated.
 
 User (Review UI)
@@ -109,7 +126,7 @@ User (Review UI)
 
 User (Chat UI)
   → POST /api/chat
-      1. Embeds question via Gemini text-embedding-004
+      1. Embeds question via Gemini gemini-embedding-001
       2. Vector similarity search (approved rows only, HNSW index)
       3. If aggregative question: also runs SQL aggregate (SUM/COUNT)
       4. Passes context + question to gemini-2.0-flash
@@ -161,10 +178,15 @@ User (Chat UI)
 n8n writes directly to Supabase — no Next.js API route is involved in the ingestion pipeline.
 
 **n8n workflow:**
-1. Gmail trigger — polls for unread emails with PDF attachments
-2. LLM extraction — sends PDF to model, extracts structured fields
-3. Supabase DB node — `INSERT` into `invoices` with `status='pending'`
-4. Supabase Vector Store node — generates embedding from `raw_text`, writes to `invoices.embedding`
+1. Gmail trigger — polls for emails from `payments-noreply@google.com` with PDF attachments
+2. Supabase Storage Upload — stores PDF at `invoices/{gmail_message_id}.pdf`
+3. Supabase DB trigger (`on_invoice_upload`) — fires on storage insert, calls n8n Webhook
+4. n8n Webhook → HTTP Request → fetches PDF binary from storage
+5. Gemini 2.0 Flash (multimodal) — reads PDF directly, returns structured JSON
+6. Code node — flattens JSON to DB columns, builds `raw_text`
+7. Dedup check — skips if `(invoice_number, vendor_name)` already exists
+8. HTTP Request → `gemini-embedding-001` — generates 768-dim vector from `raw_text`
+9. Supabase node — `INSERT` with all fields + embedding (`status='pending'`)
 
 All fields are optional at insert — the user corrects any extraction errors in the Review UI before approving.
 

@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Schema used in the n8n 'Extract Invoice JSON' node. Gemini 2.0 Flash reads the PDF binary and returns JSON matching this shape. The 'Format Data for DB' code node then flattens it into DB columns.",
+  "type": "object",
+  "properties": {
+    "document_type": {
+      "type": "string",
+      "description": "The type of document",
+      "enum": ["Invoice", "Receipt", "Credit Note", "Other"]
+    },
+    "vendor_details": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the billing company (e.g. 'Google Cloud EMEA Limited')",
+          "maps_to": "invoices.vendor_name"
+        },
+        "address": {
+          "type": "string",
+          "description": "Full address of the vendor",
+          "maps_to": "invoices.metadata.vendor_details.address"
+        },
+        "vat_number": {
+          "type": "string",
+          "description": "VAT or Tax ID of the vendor (e.g. 'IE3668997OH')",
+          "maps_to": "invoices.metadata.vendor_details.vat_number"
+        }
+      }
+    },
+    "billing_details": {
+      "type": "object",
+      "properties": {
+        "invoice_number": {
+          "type": "string",
+          "description": "Unique invoice number (e.g. '5531449542')",
+          "maps_to": "invoices.invoice_number"
+        },
+        "invoice_date": {
+          "type": "string",
+          "description": "Date of invoice in YYYY-MM-DD format",
+          "maps_to": "invoices.invoice_date"
+        },
+        "billing_id": {
+          "type": "string",
+          "description": "Account or Billing ID (e.g. '9373-7499-6112')",
+          "maps_to": "invoices.metadata.billing_details.billing_id"
+        },
+        "due_amount": {
+          "type": "number",
+          "description": "Total amount due (e.g. 16.20)",
+          "maps_to": "invoices.amount"
+        },
+        "currency": {
+          "type": "string",
+          "description": "3-letter ISO currency code (e.g. 'EUR', 'USD')",
+          "maps_to": "invoices.currency"
+        },
+        "tax_amount": {
+          "type": "number",
+          "description": "Total tax or VAT amount (e.g. 0.00)",
+          "maps_to": "invoices.tax"
+        },
+        "tax_rate_percent": {
+          "type": "number",
+          "description": "Percentage of tax applied (e.g. 0)",
+          "maps_to": "invoices.metadata.billing_details.tax_rate_percent"
+        }
+      }
+    },
+    "customer_details": {
+      "type": "object",
+      "properties": {
+        "bill_to_name": {
+          "type": "string",
+          "description": "Name of the person or company being billed (e.g. 'Rick Love')",
+          "maps_to": "invoices.metadata.customer_details.bill_to_name"
+        },
+        "domain_name": {
+          "type": "string",
+          "description": "Associated domain name if present (e.g. 'sundayaiwork.com')",
+          "maps_to": "invoices.metadata.customer_details.domain_name"
+        },
+        "bill_to_address": {
+          "type": "string",
+          "description": "Address of the customer",
+          "maps_to": "invoices.metadata.customer_details.bill_to_address"
+        }
+      }
+    },
+    "line_items": {
+      "type": "array",
+      "description": "All individual products or services billed. Concatenated into raw_text for embedding.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "subscription_or_product": {
+            "type": "string",
+            "description": "Name of product/subscription (e.g. 'Google Workspace Business Standard')"
+          },
+          "interval_or_date": {
+            "type": "string",
+            "description": "Billing period for this item (e.g. 'Mar 1 - Mar 31')"
+          },
+          "quantity": {
+            "type": "number",
+            "description": "Quantity of the item (e.g. 1)"
+          },
+          "line_total": {
+            "type": "number",
+            "description": "Total cost for this line item (e.g. 16.20)"
+          }
+        }
+      },
+      "maps_to": "invoices.metadata.line_items (full array) + raw_text (product names concatenated)"
+    }
+  },
+  "required": ["document_type", "vendor_details", "billing_details", "customer_details", "line_items"],
+  "db_column_mapping": {
+    "invoices.vendor_name": "vendor_details.name",
+    "invoices.invoice_number": "billing_details.invoice_number",
+    "invoices.invoice_date": "billing_details.invoice_date",
+    "invoices.amount": "billing_details.due_amount",
+    "invoices.tax": "billing_details.tax_amount",
+    "invoices.currency": "billing_details.currency (uppercased)",
+    "invoices.raw_text": "Constructed: 'Vendor: {name}. Invoice #{number}. Total: {amount} {currency}. Items: {product names joined}'",
+    "invoices.embedding": "768-dim vector from gemini-embedding-001 applied to raw_text",
+    "invoices.metadata": "Entire flattened cleanedJson object from Format Data for DB code node",
+    "invoices.status": "Always 'pending' on insert"
+  }
+}
