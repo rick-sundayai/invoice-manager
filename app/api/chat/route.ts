@@ -1,25 +1,19 @@
 // app/api/chat/route.ts
 import { createServerClient } from '@/lib/supabase'
 import { embedText, generateResponse } from '@/lib/gemini'
-import { isAggregativeQuery, parseDataBlock, stripDataBlock } from '@/lib/chat'
-import type { DataBlock } from '@/lib/chat'
+import {
+  isAggregativeQuery,
+  parseDataBlock,
+  stripDataBlock,
+  buildPrompt,
+} from '@/lib/chat'
+import type { DataBlock, InvoiceContext, ConversationMessage } from '@/lib/chat'
 
 const SYSTEM_PROMPT = `You are a financial assistant for InvoiceBrain, a personal invoice management tool.
 Answer questions concisely based on the invoice data provided as context.
 If your answer includes specific amounts or a vendor breakdown, end your response with a JSON block in exactly this format:
 <data>{"items":[{"vendor":"string","amount":0.00,"currency":"string"}],"total":0.00,"currency":"string"}</data>
 Only include <data> when the answer contains specific figures. Omit it for general or qualitative answers.`
-
-type InvoiceContext = {
-  vendor_name: string | null
-  invoice_date: string | null
-  invoice_number: string | null
-  amount: number | null
-  tax: number | null
-  currency: string | null
-  raw_text: string | null
-  similarity: number
-}
 
 type CurrencyAggregate = {
   currency: string
@@ -29,9 +23,11 @@ type CurrencyAggregate = {
 
 export async function POST(request: Request) {
   let message: string
+  let history: ConversationMessage[]
   try {
-    const body = await request.json() as { message?: string }
+    const body = await request.json() as { message?: string; history?: ConversationMessage[] }
     message = body.message ?? ''
+    history = body.history ?? []
   } catch {
     return Response.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
@@ -82,33 +78,14 @@ export async function POST(request: Request) {
         return acc
       }, {})
 
-      const lines = Object.values(byCurrency)
+      aggregateContext = Object.values(byCurrency)
         .map(c => `${c.currency}: ${c.sum.toFixed(2)} (${c.count} invoices)`)
         .join('\n')
-
-      aggregateContext = `\n\nGlobal approved invoice totals by currency:\n${lines}`
     }
   }
 
-  // 4. Build prompt
-  const invoiceContext =
-    invoices.length > 0
-      ? invoices
-          .map(
-            inv =>
-              `Vendor: ${inv.vendor_name ?? 'Unknown'} | Date: ${inv.invoice_date ?? 'Unknown'} | ` +
-              `Invoice#: ${inv.invoice_number ?? 'N/A'} | Amount: ${inv.amount ?? 0} ${inv.currency ?? ''} | ` +
-              `Tax: ${inv.tax ?? 0} | Similarity: ${inv.similarity.toFixed(3)}`
-          )
-          .join('\n')
-      : 'No matching invoices found.'
-
-  const prompt = `${SYSTEM_PROMPT}
-
-Relevant invoices:
-${invoiceContext}${aggregateContext}
-
-User question: ${message}`
+  // 4. Build prompt (includes history for multi-turn context)
+  const prompt = buildPrompt(SYSTEM_PROMPT, message, invoices, aggregateContext, history)
 
   // 5. Generate response
   let rawResponse: string
