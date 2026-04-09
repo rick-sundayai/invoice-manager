@@ -12,6 +12,22 @@ export type DataBlock = {
   currency?: string
 }
 
+export type InvoiceContext = {
+  vendor_name: string | null
+  invoice_date: string | null
+  invoice_number: string | null
+  amount: number | null
+  tax: number | null
+  currency: string | null
+  raw_text: string | null
+  similarity: number
+}
+
+export type ConversationMessage = {
+  role: 'user' | 'assistant'
+  text: string
+}
+
 export function parseDataBlock(text: string): DataBlock | null {
   const match = text.match(/<data>([\s\S]*?)<\/data>/)
   if (!match) return null
@@ -24,4 +40,51 @@ export function parseDataBlock(text: string): DataBlock | null {
 
 export function stripDataBlock(text: string): string {
   return text.replace(/<data>[\s\S]*?<\/data>/, '').trim()
+}
+
+export function buildPrompt(
+  systemPrompt: string,
+  message: string,
+  invoices: InvoiceContext[],
+  aggregateContext: string,
+  history: ConversationMessage[]
+): string {
+  const parts: string[] = []
+
+  // System prompt
+  parts.push(systemPrompt)
+
+  // Relevant invoices section
+  parts.push('\nRelevant invoices:')
+  if (invoices.length === 0) {
+    parts.push('No matching invoices found.')
+  } else {
+    invoices.forEach(invoice => {
+      const line = `Vendor: ${invoice.vendor_name} | Date: ${invoice.invoice_date} | Invoice#: ${invoice.invoice_number} | Amount: ${invoice.amount} ${invoice.currency} | Tax: ${invoice.tax} | Similarity: ${invoice.similarity.toFixed(3)}`
+      parts.push(line)
+    })
+  }
+
+  // Global approved invoice totals section (only if aggregateContext is non-empty)
+  if (aggregateContext) {
+    parts.push('\nGlobal approved invoice totals by currency:')
+    parts.push(aggregateContext)
+  }
+
+  // Conversation history section (only if history is non-empty)
+  if (history.length > 0) {
+    parts.push('\nConversation so far:')
+    history.forEach(msg => {
+      if (msg.role === 'user') {
+        parts.push(`User: ${msg.text}`)
+      } else {
+        parts.push(`Assistant: ${msg.text}`)
+      }
+    })
+  }
+
+  // Current user message
+  parts.push(`\nUser: ${message}`)
+
+  return parts.join('\n')
 }

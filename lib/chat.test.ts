@@ -1,5 +1,6 @@
 // lib/chat.test.ts
-import { isAggregativeQuery, parseDataBlock, stripDataBlock } from './chat'
+import { isAggregativeQuery, parseDataBlock, stripDataBlock, buildPrompt } from './chat'
+import type { InvoiceContext, ConversationMessage } from './chat'
 
 describe('isAggregativeQuery', () => {
   it('returns true for "total" keyword', () => {
@@ -55,5 +56,71 @@ describe('stripDataBlock', () => {
 
   it('returns text unchanged when no data block present', () => {
     expect(stripDataBlock('No block here.')).toBe('No block here.')
+  })
+})
+
+describe('buildPrompt', () => {
+  const SYSTEM = 'You are a financial assistant.'
+
+  const invoice: InvoiceContext = {
+    vendor_name: 'Google',
+    invoice_date: '2026-03-01',
+    invoice_number: 'INV-001',
+    amount: 16.20,
+    tax: 0,
+    currency: 'EUR',
+    raw_text: 'Google invoice',
+    similarity: 0.95,
+  }
+
+  it('includes the system prompt', () => {
+    const result = buildPrompt(SYSTEM, 'question', [], '', [])
+    expect(result).toContain(SYSTEM)
+  })
+
+  it('includes the user message', () => {
+    const result = buildPrompt(SYSTEM, 'What did I spend?', [], '', [])
+    expect(result).toContain('What did I spend?')
+  })
+
+  it('formats invoice context into the prompt', () => {
+    const result = buildPrompt(SYSTEM, 'q', [invoice], '', [])
+    expect(result).toContain('Google')
+    expect(result).toContain('INV-001')
+    expect(result).toContain('16.2')
+  })
+
+  it('shows no-match message when invoices array is empty', () => {
+    const result = buildPrompt(SYSTEM, 'q', [], '', [])
+    expect(result).toContain('No matching invoices found')
+  })
+
+  it('appends aggregate context when provided', () => {
+    const result = buildPrompt(SYSTEM, 'q', [], 'EUR: 100.00 (3 invoices)', [])
+    expect(result).toContain('EUR: 100.00 (3 invoices)')
+  })
+
+  it('omits aggregate section when aggregateContext is empty string', () => {
+    const result = buildPrompt(SYSTEM, 'q', [], '', [])
+    expect(result).not.toContain('Global approved invoice totals')
+  })
+
+  it('inserts history messages in order before the user message', () => {
+    const history: ConversationMessage[] = [
+      { role: 'user', text: 'First question' },
+      { role: 'assistant', text: 'First answer' },
+    ]
+    const result = buildPrompt(SYSTEM, 'Follow-up', [], '', history)
+    const firstIdx = result.indexOf('First question')
+    const firstAnswerIdx = result.indexOf('First answer')
+    const followUpIdx = result.indexOf('Follow-up')
+    expect(firstIdx).toBeGreaterThan(-1)
+    expect(firstIdx).toBeLessThan(firstAnswerIdx)
+    expect(firstAnswerIdx).toBeLessThan(followUpIdx)
+  })
+
+  it('omits history section when history is empty', () => {
+    const result = buildPrompt(SYSTEM, 'q', [], '', [])
+    expect(result).not.toContain('Conversation so far')
   })
 })
